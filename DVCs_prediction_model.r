@@ -126,7 +126,49 @@ expanded_q <- roads_df %>%
   )
 
 # -----------------------------
-# Build prediction model
+# 4) develope g（INLA graph）
+# -----------------------------
+adj <- read.csv("road_neighbors.csv") #segment pairs
+
+# Remove missing
+adj <- adj %>% filter(!is.na(SEG_NO), !is.na(SEG_NO_2),!is.na(CTY_CODE), !is.na(CTY_CODE_2), !is.na(ST_RT_NO), !is.na(ST_RT_NO_2))#%>%
+
+#create SEG_KEY in adj
+adj <- adj %>%
+  mutate(
+    SEG_KEY = paste(CTY_CODE, ST_RT_NO, SEG_NO, sep = "_"),
+    SEG_KEY_2 = paste(CTY_CODE_2, ST_RT_NO_2, SEG_NO_2,  sep = "_")  
+  ) %>%
+  distinct(SEG_KEY, SEG_KEY_2) %>%
+  filter(SEG_KEY != SEG_KEY_2)
+# Build lookup of all unique IDs and assign new consecutive numbers
+lookup <- data.frame(old_id = sort(unique(c(adj$SEG_KEY, adj$SEG_KEY_2))))
+lookup$new_id <- seq_len(nrow(lookup))
+#write.csv(lookup, "lookup.csv", row.names = FALSE)
+#lookup <- read.csv("lookup.csv")
+#Join lookup twice to get new consecutive ids
+adj <- adj %>%
+  left_join(lookup, by = c("SEG_KEY" = "old_id")) %>%
+  rename(SEG_NEW = new_id) %>%
+  left_join(lookup, by = c("SEG_KEY_2" = "old_id")) %>%
+  rename(SEG2_NEW = new_id) %>%
+  filter(!is.na(SEG_NEW), !is.na(SEG2_NEW))
+
+# --- Build neighbor list ---
+n <- max(c(adj$SEG_NEW, adj$SEG2_NEW))
+nb <- lapply(1:n, function(i) adj$SEG2_NEW[adj$SEG_NEW == i])
+class(nb) <- "nb"
+attr(nb, "region.id") <- as.character(1:n)
+attr(nb, "type") <- "user"
+attr(nb, "sym") <- TRUE
+             
+# Save adjacency for INLA
+nb2INLA("roads.adj", nb)
+g <- inla.read.graph("roads.adj")
+
+             
+# -----------------------------
+# 5.Build prediction model
 # Compute center/scale from your TRAINING PERIOD (e.g., 2018–2023) using raw columns
 # -----------------------------
 #1
@@ -270,7 +312,7 @@ res_pred$dic$p.eff     # effective number of parameters (pD)
 res_pred$dic$mean.deviance
 
 # -----------------------------
-#Obtain 2024 deer-related crash dataset
+#6. Obtain 2024 deer-related crash dataset
 # -----------------------------
 #crash_2024<- read.csv('Statewide_2024/CRASH_2024.csv')
 #crash_2024_s <- dplyr::select(crash_2024, CRN, COUNTY, CRASH_MONTH, CRASH_YEAR)
@@ -305,7 +347,7 @@ crash_seg_summary_q2024 <- state_road_layer2024 %>%
   distinct(CTY_CODE, ST_RT_NO, SEG_NO, SEG_KEY,CRASH_COUNT, CRASH_YEAR, QUARTER)  
 
 # -----------------------------
-#join 2024 prediction data with real data
+#7. join 2024 prediction data with real data
 # -----------------------------
 join <- left_join(df_2024_pred, crash_seg_summary_q2024, by = c("SEG_KEY", "CTY_CODE","ST_RT_NO","SEG_NO","CRASH_YEAR","QUARTER"))
 #impute crash count=0 if no crash happen in a segment per quarter
@@ -328,7 +370,7 @@ join_q4 <- join %>%
   mutate(SEG_KEY = paste(CTY_CODE, ST_RT_NO, SEG_NO, sep = "_"))%>% 
   filter(join$QUARTER==4)
 # -----------------------------
-#Combine with road map to plot crash on map
+#8. Combine with road map to plot crash on map
 # -----------------------------
 roads <- st_read("RMSSEG_(State_Roads)/RMSSEG_(State_Roads).shp", quiet = TRUE)   
 
