@@ -1,5 +1,8 @@
 setwd("~/Downloads/Liquan/ANLY599/Code")
-
+#-----Source data-------#
+#Pennsylvania Department of Transportation (PennDOT). (2024). Pennsylvania State Roads (RMSSEG) [Data set]. PennShare Open Data Portal. Retrieved from: https://data-pennshare.opendata.arcgis.com/datasets/d9a2a5df74cf4726980e5e276d51fe8d_0
+#-----Source data Obtain-------#
+#Obtain crash data
 crash_2018<- read.csv("Statewide_2018/CRASH_2018.csv")
 crash_2019<- read.csv('Statewide_2019/CRASH_2019.csv')
 crash_2020<- read.csv('Statewide_2020/CRASH_2020.csv')
@@ -7,7 +10,6 @@ crash_2021<- read.csv('Statewide_2021/CRASH_2021.csv')
 crash_2022<- read.csv('Statewide_2022/CRASH_2022.csv')
 crash_2023<- read.csv('Statewide_2023/CRASH_2023.csv')
 crash_2024<- read.csv('Statewide_2024/CRASH_2024.csv')
-
 crash_2018_s <- dplyr::select(crash_2018, CRN, COUNTY, CRASH_MONTH, CRASH_YEAR, DAY_OF_WEEK, DEC_LATITUDE, DEC_LONGITUDE, HOUR_OF_DAY, INTERSECT_TYPE, MAX_SEVERITY_LEVEL, ILLUMINATION,  RELATION_TO_ROAD, URBAN_RURAL, WEATHER1, WEATHER2)
 crash_2019_s <- dplyr::select(crash_2019, CRN, COUNTY, CRASH_MONTH, CRASH_YEAR, DAY_OF_WEEK, DEC_LATITUDE, DEC_LONGITUDE, HOUR_OF_DAY, INTERSECT_TYPE, MAX_SEVERITY_LEVEL, ILLUMINATION,  RELATION_TO_ROAD, URBAN_RURAL, WEATHER1, WEATHER2)
 crash_2020_s <- dplyr::select(crash_2020, CRN, COUNTY, CRASH_MONTH, CRASH_YEAR, DAY_OF_WEEK, DEC_LATITUDE, DEC_LONGITUDE, HOUR_OF_DAY, INTERSECT_TYPE, MAX_SEVERITY_LEVEL, ILLUMINATION, RELATION_TO_ROAD, URBAN_RURAL, WEATHER1, WEATHER2)
@@ -16,7 +18,8 @@ crash_2022_s <- dplyr::select(crash_2022, CRN, COUNTY, CRASH_MONTH, CRASH_YEAR, 
 crash_2023_s <- dplyr::select(crash_2023, CRN, COUNTY, CRASH_MONTH, CRASH_YEAR, DAY_OF_WEEK, DEC_LAT, DEC_LONG, HOUR_OF_DAY, INTERSECT_TYPE, MAX_SEVERITY_LEVEL, ILLUMINATION, RELATION_TO_ROAD, URBAN_RURAL, WEATHER1, WEATHER2)
 crash_2023_renamed <- rename(crash_2023_s, DEC_LATITUDE = DEC_LAT)
 crash_2023_renamed <- rename(crash_2023_renamed , DEC_LONGITUDE = DEC_LONG)
-
+crash_combined <- rbind(crash_2018_s,crash_2019_s, crash_2020_s, crash_2021_s, crash_2022_s, crash_2023_renamed )
+#Obtain deer related flags
 flag_2018<- read.csv( 'Statewide_2018/FLAGS_2018.csv')
 flag_2019<- read.csv('Statewide_2019/FLAGS_2019.csv')
 flag_2020<- read.csv('Statewide_2020/FLAGS_2020.csv')
@@ -30,20 +33,15 @@ flag_2020_s <- dplyr::select(flag_2020,CRN, DEER_RELATED, SPEEDING)
 flag_2021_s <- dplyr::select(flag_2021,CRN, DEER_RELATED, SPEEDING)
 flag_2022_s <- dplyr::select(flag_2022,CRN, DEER_RELATED, SPEEDING)
 flag_2023_s <- dplyr::select(flag_2023,CRN, DEER_RELATED, SPEEDING)
-
-
-crash_combined <- rbind(crash_2018_s,crash_2019_s, crash_2020_s, crash_2021_s, crash_2022_s, crash_2023_renamed )
 flag_combined <- rbind(flag_2018_s, flag_2019_s, flag_2020_s,flag_2021_s, flag_2022_s, flag_2023_s)
-
-
-
+#Combine crash with flag via CRN
 crash1<-
   crash_combined %>%
   left_join(flag_combined, by = "CRN") 
-
 sum(duplicated(crash1[, c("CRN")]))
-
+#Select deer related crash
 crash2<-crash1[crash1$DEER_RELATED==1,]
+
 #############
 #Use QGIS to link crash location with state road segments to obtain state_road_layer.csv
 #############
@@ -53,7 +51,6 @@ library(tidyr)
 library(sf)
 library(INLA)
 library(spdep)
-# library(lubridate)  # can be used if you want lubridate::quarter
 
 state_road_layer <- read.csv("state_road_layer.csv")
 
@@ -120,7 +117,6 @@ expanded_q <- roads_df %>%
     CUR_AADT    = ifelse(is.na(CUR_AADT), 0, CUR_AADT),
     TOTAL_WIDT  = ifelse(is.na(TOTAL_WIDT), NA, TOTAL_WIDT),
     LANE_CNT    = ifelse(is.na(LANE_CNT), NA, LANE_CNT),
-    # NOTE: check column name URBAN_RURA vs URBAN_RURAL in your data
     URBAN_RURAL = ifelse(is.na(URBAN_RURA), NA, URBAN_RURA),
     ACCESS_CTR  = ifelse(is.na(ACCESS_CTR), NA, ACCESS_CTR),
     ROUGH_INDX  = ifelse(is.na(ROUGH_INDX), 0, ROUGH_INDX),
@@ -128,9 +124,12 @@ expanded_q <- roads_df %>%
     COUNTY      = ifelse(is.na(CTY_CODE), NA, CTY_CODE),
     TIME_KEY_Q  = (CRASH_YEAR - min_year) * 4L + QUARTER   # quarter index
   )
-library(dplyr)
+
+# -----------------------------
 # Build prediction model
 # Compute center/scale from your TRAINING PERIOD (e.g., 2018–2023) using raw columns
+# -----------------------------
+#1
 scales <- expanded_q %>%
   summarise(
     mu_widt = mean(TOTAL_WIDT,   na.rm = TRUE),
@@ -160,7 +159,7 @@ df_q <- expanded_q %>%
     SEGMENT_MI_s    = scale_with(SEGMENT_MI,     scales$mu_len, scales$sd_len),
     URBAN_RURAL_s = scale_with(as.numeric(URBAN_RURA), scales$mu_ur, scales$sd_ur)
   )
-#add interaction
+#add interaction (not used infinal dataset)
 df_q <- df_q %>%
   mutate(
     st_inter = interaction(seg_idx, TIME_KEY_Q, drop = TRUE),
@@ -208,8 +207,6 @@ df_2024 <- df_2024 %>%
 
 
 #3
-
-##########
 formula_q2 <- CRASH_COUNT ~  
   1 +
   TOTAL_WIDT_s +
@@ -225,7 +222,6 @@ formula_q2 <- CRASH_COUNT ~
     hyper=list(prec=list(prior="pc.prec", param=c(1,0.01)))) +
   offset(log_AADT)
 
-#########
 
 df_pred_all <- bind_rows(df_q_small, df_2024)
 
@@ -255,7 +251,8 @@ summary(res_pred)
 # Pull out the 2024 part
 n_train <- nrow(df_q_small)
 pick    <- (n_train + 1):nrow(df_pred_all)
-#113852*4=455408
+
+#state managed state segement number*quater numer=113852*4=455408
 df_2024_pred <- df_pred_all[pick, ] %>%
   mutate(
     pred_mean = res_pred$summary.fitted.values$mean[pick],
@@ -265,13 +262,16 @@ df_2024_pred <- df_pred_all[pick, ] %>%
 #write.csv(df_2024_pred, "df_2024_pred.csv", row.names = FALSE)
 #df_2024_pred <- read.csv("df_2024_pred.csv")
 
+#Evaluate the model goodness of fitness
 res_pred$waic$waic
 res_pred$cpo$cpo
 res_pred$dic$dic       # DIC value
 res_pred$dic$p.eff     # effective number of parameters (pD)
 res_pred$dic$mean.deviance
 
+# -----------------------------
 #Obtain 2024 deer-related crash dataset
+# -----------------------------
 #crash_2024<- read.csv('Statewide_2024/CRASH_2024.csv')
 #crash_2024_s <- dplyr::select(crash_2024, CRN, COUNTY, CRASH_MONTH, CRASH_YEAR)
 #flag_2024<- read.csv('Statewide_2024/FLAGS_2024.csv')
@@ -289,7 +289,7 @@ state_road_layer2024 <- read.csv("state_road_layer2024.csv")
 #Summarize 
 crash_seg_summary_q2024 <- state_road_layer2024 %>%
   mutate(
-    CTY_CODE   = as.numeric(CTY_CODE),                  # ← 保证与 roads_df 一致
+    CTY_CODE   = as.numeric(CTY_CODE),                  # ← keep consistent with roads_df 
     CRASH_MONTH = as.integer(CRASH_MONTH),
     QUARTER     = ((CRASH_MONTH - 1L) %/% 3L) + 1L      # 1..4
     
@@ -304,7 +304,9 @@ crash_seg_summary_q2024 <- state_road_layer2024 %>%
   )%>%
   distinct(CTY_CODE, ST_RT_NO, SEG_NO, SEG_KEY,CRASH_COUNT, CRASH_YEAR, QUARTER)  
 
+# -----------------------------
 #join 2024 prediction data with real data
+# -----------------------------
 join <- left_join(df_2024_pred, crash_seg_summary_q2024, by = c("SEG_KEY", "CTY_CODE","ST_RT_NO","SEG_NO","CRASH_YEAR","QUARTER"))
 #impute crash count=0 if no crash happen in a segment per quarter
 join$CRASH_COUNT.y <- ifelse(is.na(join$CRASH_COUNT.y), 0, join$CRASH_COUNT.y)
@@ -325,17 +327,15 @@ join_q3 <- join %>%
 join_q4 <- join %>% 
   mutate(SEG_KEY = paste(CTY_CODE, ST_RT_NO, SEG_NO, sep = "_"))%>% 
   filter(join$QUARTER==4)
-
+# -----------------------------
 #Combine with road map to plot crash on map
+# -----------------------------
 roads <- st_read("RMSSEG_(State_Roads)/RMSSEG_(State_Roads).shp", quiet = TRUE)   
 
 #library(readxl)
 #library(writexl)
 road_q1<-left_join(roads, join_q1, by = c("CTY_CODE","ST_RT_NO","SEG_NO"))
 #write.csv(road_q1, "road_join2024q1_nb.xlsx", row.names = FALSE)
-#write_xlsx(read_q1, "road_join2024q1_nb.xlsx")
-#road_q1_ <- read_excel("road_join2024q1_nb.xlsx", sheet = 1)
-
 road_q2<-left_join(roads, join_q2, by = c("CTY_CODE","ST_RT_NO","SEG_NO"))
 #write.csv(road_q2, "road_join2024q2_nb.csv", row.names = FALSE)
 road_q3<-left_join(roads, join_q3, by = c("CTY_CODE","ST_RT_NO","SEG_NO"))
@@ -344,6 +344,9 @@ road_q4<-left_join(roads, join_q4, by = c("CTY_CODE","ST_RT_NO","SEG_NO"))
 #write.csv(road_q4, "road_join2024q4_nb.csv", row.names = FALSE)
 #write.csv(join, "pred_join.csv", row.names = FALSE)
 
+# -----------------------------
+# Predition performance
+# -----------------------------
 pred <- road_q4%>%
   filter(!is.na(CRASH_COUNT.y))
 #predother <- pred%>%
@@ -386,7 +389,7 @@ dat_eval2 <- road_q4 %>%
     has_crash = CRASH_COUNT.y > 0
   )
 
-# 每个风险等级的“校准表”
+# Risk Class
 tab_risk <- dat_eval2 %>%
   group_by(risk_class) %>%
   summarise(
